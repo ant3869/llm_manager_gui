@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 
 const DEFAULT_CHAIN_OF_THOUGHT_PROMPT = `Before providing solutions:
@@ -24,19 +24,87 @@ export default function ModelSettings() {
     stt: false,
     tts: false
   });
+  
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState(null);
 
+  // Load settings from backend
   useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const response = await fetch('/api/config/model-settings');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.settings) {
+            setSettings(prev => ({
+              ...prev,
+              ...data.settings
+            }));
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load settings:', error);
+      }
+    };
+
+    loadSettings();
+    
     setIsSupported({
       stt: 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window,
       tts: 'speechSynthesis' in window
     });
   }, []);
+  
+  // Debounced save function
+  const saveSettings = useCallback(
+    async (settingsToSave) => {
+      setIsSaving(true);
+      setSaveStatus(null);
+      
+      try {
+        const response = await fetch('/api/config/model-settings', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ settings: settingsToSave })
+        });
+        
+        if (response.ok) {
+          setSaveStatus('success');
+        } else {
+          setSaveStatus('error');
+        }
+      } catch (error) {
+        console.error('Failed to save settings:', error);
+        setSaveStatus('error');
+      } finally {
+        setIsSaving(false);
+        
+        // Clear status after 3 seconds
+        setTimeout(() => {
+          setSaveStatus(null);
+        }, 3000);
+      }
+    },
+    []
+  );
 
+  // Debounce setting changes
   const handleSettingChange = (setting, value) => {
-    setSettings(prev => ({
-      ...prev,
+    const newSettings = {
+      ...settings,
       [setting]: value
-    }));
+    };
+    
+    setSettings(newSettings);
+    
+    // Save to backend after a short delay
+    const timeoutId = setTimeout(() => {
+      saveSettings(newSettings);
+    }, 1000);
+    
+    return () => clearTimeout(timeoutId);
   };
 
   return (
@@ -46,7 +114,18 @@ export default function ModelSettings() {
       className="h-full w-80 bg-white dark:bg-gray-800 border-l dark:border-gray-700 shadow-lg overflow-y-auto"
     >
       <div className="p-4 space-y-6">
-        <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200">Model Settings</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200">Model Settings</h2>
+          {isSaving && (
+            <span className="text-xs text-gray-500 dark:text-gray-400">Saving...</span>
+          )}
+          {saveStatus === 'success' && (
+            <span className="text-xs text-green-500">Saved</span>
+          )}
+          {saveStatus === 'error' && (
+            <span className="text-xs text-red-500">Save failed</span>
+          )}
+        </div>
 
         <div className="space-y-4">
           <div className="mb-6">

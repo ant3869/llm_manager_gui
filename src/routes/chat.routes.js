@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getDb } from '../database/index.js';
+import { runQuery, getQuery } from '../database/index.js';
 import { logger } from '../utils/logger.js';
 
 const router = Router();
@@ -7,10 +7,14 @@ const router = Router();
 // Create new conversation
 router.post('/conversations', async (req, res) => {
   try {
-    const db = getDb();
     const conversationId = Date.now().toString();
+    const title = req.body.title || 'New Conversation';
+    const userId = req.body.userId || 'anonymous';
     
-    db.prepare('INSERT INTO conversations (id) VALUES (?)').run(conversationId);
+    await runQuery(
+      'INSERT INTO conversations (id, title, user_id) VALUES (?, ?, ?)',
+      [conversationId, title, userId]
+    );
     
     res.json({ conversationId });
   } catch (error) {
@@ -24,15 +28,23 @@ router.post('/conversations/:conversationId/messages', async (req, res) => {
   try {
     const { conversationId } = req.params;
     const { content, role } = req.body;
-    const db = getDb();
     
     const messageId = Date.now().toString();
+    const tokens = content.length / 4; // Simple estimation
     
-    db.prepare(
-      'INSERT INTO messages (id, conversation_id, role, content) VALUES (?, ?, ?, ?)'
-    ).run(messageId, conversationId, role, content);
+    await runQuery(
+      'INSERT INTO messages (id, conversation_id, role, content, tokens) VALUES (?, ?, ?, ?, ?)',
+      [messageId, conversationId, role, content, tokens]
+    );
     
-    // Implement AI response generation here
+    // Update conversation timestamp
+    await runQuery(
+      'UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [conversationId]
+    );
+    
+    // If this is a user message, we would typically generate an AI response here
+    // For now, we'll just return the message ID
     
     res.json({ messageId });
   } catch (error) {
@@ -45,16 +57,68 @@ router.post('/conversations/:conversationId/messages', async (req, res) => {
 router.get('/conversations/:conversationId', async (req, res) => {
   try {
     const { conversationId } = req.params;
-    const db = getDb();
     
-    const messages = db.prepare(
-      'SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC'
-    ).all(conversationId);
+    // Get conversation details
+    const conversation = await getQuery(
+      'SELECT * FROM conversations WHERE id = ?',
+      [conversationId]
+    );
     
-    res.json({ messages });
+    if (conversation.length === 0) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
+    
+    // Get messages
+    const messages = await getQuery(
+      'SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC',
+      [conversationId]
+    );
+    
+    res.json({ 
+      conversation: conversation[0],
+      messages 
+    });
   } catch (error) {
     logger.error('Error fetching conversation:', error);
     res.status(500).json({ error: 'Failed to fetch conversation' });
+  }
+});
+
+// Get all conversations
+router.get('/conversations', async (req, res) => {
+  try {
+    const conversations = await getQuery(
+      'SELECT * FROM conversations ORDER BY updated_at DESC'
+    );
+    
+    res.json({ conversations });
+  } catch (error) {
+    logger.error('Error fetching conversations:', error);
+    res.status(500).json({ error: 'Failed to fetch conversations' });
+  }
+});
+
+// Delete conversation
+router.delete('/conversations/:conversationId', async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    
+    // Delete messages first (foreign key constraint)
+    await runQuery(
+      'DELETE FROM messages WHERE conversation_id = ?',
+      [conversationId]
+    );
+    
+    // Delete conversation
+    await runQuery(
+      'DELETE FROM conversations WHERE id = ?',
+      [conversationId]
+    );
+    
+    res.json({ success: true });
+  } catch (error) {
+    logger.error('Error deleting conversation:', error);
+    res.status(500).json({ error: 'Failed to delete conversation' });
   }
 });
 
