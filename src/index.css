@@ -1,0 +1,12 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.transition-margin {
+  transition: margin-left 0.3s ease-in-out;
+}
+
+/* Add smooth transitions for dark mode */
+.dark {
+  transition: background-color 0.3s ease-in-out, color 0.3s ease-in-out;
+}
